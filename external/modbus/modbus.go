@@ -24,6 +24,7 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/rulego/rulego"
@@ -504,11 +505,12 @@ func (r *RetryableModbusClient) SetEncoding(endianness modbus.Endianness, wordOr
 type ModbusNode struct {
 	base.SharedNode[*modbus.ModbusClient]
 	//节点配置
-	Config           ModbusConfiguration
-	addressTemplate  str.Template
-	quantityTemplate str.Template
-	valueTemplate    str.Template
-	regTypeTemplate  str.Template
+	Config            ModbusConfiguration
+	addressTemplate   str.Template
+	quantityTemplate  str.Template
+	valueTemplate     str.Template
+	regTypeTemplate   str.Template
+	reconnectLocker   sync.Mutex
 }
 
 type Params struct {
@@ -616,8 +618,11 @@ func readModbusValues[T bool | uint16 | uint32 | uint64 | float32 | float64 | by
 }
 
 // reconnect 通过 SharedNode 机制安全地重建连接
-// 先 Close 清理旧连接（会重置 clientInitialized），再 GetSafely 创建新连接
+// 使用互斥锁避免并发重连导致惊群效应：多个请求同时失败时，只有一个执行 Close+GetSafely，
+// 其余请求等待后直接通过 GetSafely 获取已重建的连接
 func (x *ModbusNode) reconnect() (*modbus.ModbusClient, error) {
+	x.reconnectLocker.Lock()
+	defer x.reconnectLocker.Unlock()
 	// Close 会清理 localClient 并重置 clientInitialized=false
 	_ = x.SharedNode.Close()
 	// GetSafely 检测到 clientInitialized=false 后会调用 InitInstanceFunc 创建新客户端
@@ -685,7 +690,7 @@ func (x *ModbusNode) executeModbusCommand(params *Params, retryableClient *Retry
 		data     []ModbusValue = make([]ModbusValue, 0)
 	)
 
-	switch x.Config.Cmd {
+	switch params.Cmd {
 	case "ReadCoils":
 		boolVals, err = retryableClient.ReadCoils(params.Address, params.Quantity)
 		if err == nil {
@@ -862,7 +867,7 @@ func (x *ModbusNode) executeModbusCommand(params *Params, retryableClient *Retry
 	case "WriteRawBytes":
 		err = retryableClient.WriteRawBytes(params.Address, []byte(params.Value))
 	default:
-		return &UnknownCommandErr{Cmd: x.Config.Cmd}, data
+		return &UnknownCommandErr{Cmd: params.Cmd}, data
 	}
 
 	return err, data
@@ -906,13 +911,22 @@ func (x *ModbusNode) getParams(ctx types.RuleContext, msg types.RuleMsg) (*Param
 		regType = modbus.RegType(tmp)
 	}
 	val = x.valueTemplate.Execute(evn)
-	//value = []byte(val)
 	// 更新参数
 	params.Cmd = x.Config.Cmd
 	params.Address = address
 	params.Quantity = quanitity
 	params.Value = val
 	params.RegType = regType
+
+	// 校验必要参数
+	if address == 0 {
+		return nil, fmt.Errorf("modbus address cannot be 0 or empty, template result: %s", x.addressTemplate.Execute(evn))
+	}
+	// 写操作需要 value 参数
+	if strings.HasPrefix(params.Cmd, "Write") && strings.TrimSpace(val) == "" {
+		return nil, fmt.Errorf("modbus value cannot be empty for write command: %s", params.Cmd)
+	}
+
 	return &params, nil
 }
 
