@@ -498,16 +498,6 @@ func (r *RetryableModbusClient) SetEncoding(endianness modbus.Endianness, wordOr
 	r.client.SetEncoding(endianness, wordOrder)
 }
 
-// Close 关闭连接
-func (r *RetryableModbusClient) Close() error {
-	return r.client.Close()
-}
-
-// Open 打开连接
-func (r *RetryableModbusClient) Open() error {
-	return r.client.Open()
-}
-
 // ModbusNode 客户端节点，
 // 成功：转向Success链，发送消息执行结果存放在msg.Data
 // 失败：转向Failure链
@@ -732,46 +722,46 @@ func (x *ModbusNode) executeModbusCommand(params *Params, retryableClient *Retry
 	case "ReadUint32s":
 		ui32s, err = retryableClient.ReadUint32s(params.Address, params.Quantity, params.RegType)
 		if err == nil {
-			data = readModbusValues(ui32s, params.Address, 1, x.Config.UnitId)
+			data = readModbusValues(ui32s, params.Address, 2, x.Config.UnitId)
 		}
 	case "ReadUint32":
 		ui32, err = retryableClient.ReadUint32(params.Address, params.RegType)
 		if err == nil {
 			ui32s = append(ui32s, ui32)
-			data = readModbusValues(ui32s, params.Address, 1, x.Config.UnitId)
+			data = readModbusValues(ui32s, params.Address, 2, x.Config.UnitId)
 		}
 	case "ReadFloat32s":
 		f32s, err = retryableClient.ReadFloat32s(params.Address, params.Quantity, params.RegType)
 		if err == nil {
-			data = readModbusValues(f32s, params.Address, 1, x.Config.UnitId)
+			data = readModbusValues(f32s, params.Address, 2, x.Config.UnitId)
 		}
 	case "ReadFloat32":
 		f32, err = retryableClient.ReadFloat32(params.Address, params.RegType)
 		if err == nil {
 			f32s = append(f32s, f32)
-			data = readModbusValues(f32s, params.Address, 1, x.Config.UnitId)
+			data = readModbusValues(f32s, params.Address, 2, x.Config.UnitId)
 		}
 	case "ReadUint64s":
 		ui64s, err = retryableClient.ReadUint64s(params.Address, params.Quantity, params.RegType)
 		if err == nil {
-			data = readModbusValues(ui64s, params.Address, 1, x.Config.UnitId)
+			data = readModbusValues(ui64s, params.Address, 4, x.Config.UnitId)
 		}
 	case "ReadUint64":
 		ui64, err = retryableClient.ReadUint64(params.Address, params.RegType)
 		if err == nil {
 			ui64s = append(ui64s, ui64)
-			data = readModbusValues(ui64s, params.Address, 1, x.Config.UnitId)
+			data = readModbusValues(ui64s, params.Address, 4, x.Config.UnitId)
 		}
 	case "ReadFloat64s":
 		f64s, err = retryableClient.ReadFloat64s(params.Address, params.Quantity, params.RegType)
 		if err == nil {
-			data = readModbusValues(f64s, params.Address, 1, x.Config.UnitId)
+			data = readModbusValues(f64s, params.Address, 4, x.Config.UnitId)
 		}
 	case "ReadFloat64":
 		f64, err = retryableClient.ReadFloat64(params.Address, params.RegType)
 		if err == nil {
 			f64s = append(f64s, f64)
-			data = readModbusValues(f64s, params.Address, 1, x.Config.UnitId)
+			data = readModbusValues(f64s, params.Address, 4, x.Config.UnitId)
 		}
 	case "ReadBytes":
 		bts, err = retryableClient.ReadBytes(params.Address, params.Quantity, params.RegType)
