@@ -122,19 +122,26 @@ type RtuConfig struct {
 	StopBits uint `json:"stopBits"`
 }
 
+// reconnectFunc 重新获取连接的回调函数
+// 由 ModbusNode 提供，通过 SharedNode.Close() + GetSafely() 实现安全的连接重建
+type reconnectFunc func() (*modbus.ModbusClient, error)
+
 // RetryableModbusClient 带重试逻辑的Modbus客户端
 type RetryableModbusClient struct {
-	client     *modbus.ModbusClient
-	maxRetries int
-	logger     types.Logger
+	client      *modbus.ModbusClient
+	maxRetries  int
+	logger      types.Logger
+	reconnectFn reconnectFunc
 }
 
 // NewRetryableModbusClient 创建一个新的带重试逻辑的Modbus客户端
-func NewRetryableModbusClient(client *modbus.ModbusClient, maxRetries int, logger types.Logger) *RetryableModbusClient {
+// reconnectFn: 连接失败时用于重建连接的回调，由调用方通过 SharedNode 机制提供
+func NewRetryableModbusClient(client *modbus.ModbusClient, maxRetries int, logger types.Logger, reconnectFn reconnectFunc) *RetryableModbusClient {
 	return &RetryableModbusClient{
-		client:     client,
-		maxRetries: maxRetries,
-		logger:     logger,
+		client:      client,
+		maxRetries:  maxRetries,
+		logger:      logger,
+		reconnectFn: reconnectFn,
 	}
 }
 
@@ -151,14 +158,17 @@ func (r *RetryableModbusClient) executeWithRetry(operation string, fn func() err
 		if retry < r.maxRetries {
 			r.logf("Modbus %s error: %s, retry count: %d, trying to reconnect...", operation, err, retry)
 
-			// 关闭现有连接
-			_ = r.client.Close()
-
-			// 重新打开连接
-			openErr := r.client.Open()
-			if openErr != nil {
-				r.logf("Failed to reopen connection: %s", openErr)
-				return &ModbusConnErr{Err: openErr}
+			// 通过 SharedNode 机制重建连接，避免直接操作共享连接
+			if r.reconnectFn != nil {
+				newClient, reconnectErr := r.reconnectFn()
+				if reconnectErr != nil {
+					r.logf("Failed to reconnect: %s", reconnectErr)
+					return &ModbusConnErr{Err: reconnectErr}
+				}
+				r.client = newClient
+			} else {
+				// 无重连回调，直接返回错误
+				return &ModbusConnErr{Err: err}
 			}
 
 			continue
@@ -615,6 +625,15 @@ func readModbusValues[T bool | uint16 | uint32 | uint64 | float32 | float64 | by
 	return addVals
 }
 
+// reconnect 通过 SharedNode 机制安全地重建连接
+// 先 Close 清理旧连接（会重置 clientInitialized），再 GetSafely 创建新连接
+func (x *ModbusNode) reconnect() (*modbus.ModbusClient, error) {
+	// Close 会清理 localClient 并重置 clientInitialized=false
+	_ = x.SharedNode.Close()
+	// GetSafely 检测到 clientInitialized=false 后会调用 InitInstanceFunc 创建新客户端
+	return x.SharedNode.GetSafely()
+}
+
 // OnMsg 处理消息
 func (x *ModbusNode) OnMsg(ctx types.RuleContext, msg types.RuleMsg) {
 	var (
@@ -629,8 +648,8 @@ func (x *ModbusNode) OnMsg(ctx types.RuleContext, msg types.RuleMsg) {
 		return
 	}
 
-	// 为此次请求创建临时的retryableClient
-	retryableClient := NewRetryableModbusClient(conn, 3, x.RuleConfig.Logger)
+	// 为此次请求创建临时的retryableClient，传入 reconnect 回调
+	retryableClient := NewRetryableModbusClient(conn, 3, x.RuleConfig.Logger, x.reconnect)
 
 	params, err = x.getParams(ctx, msg)
 	if err != nil {
