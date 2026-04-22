@@ -157,6 +157,14 @@ func (r *RetryableModbusClient) executeWithRetry(operation string, fn func() err
 
 		// 判断是否为连接错误，并且重试次数未达上限
 		if retry < r.maxRetries {
+			// 跳过明确的非网络/重试无效的协议错误
+			if err == modbus.ErrIllegalFunction ||
+				err == modbus.ErrIllegalDataAddress ||
+				err == modbus.ErrIllegalDataValue ||
+				err == modbus.ErrConfigurationError {
+				return err
+			}
+
 			r.logf("Modbus %s error: %s, retry count: %d, trying to reconnect...", operation, err, retry)
 
 			// 通过 SharedNode 机制重建连接，避免直接操作共享连接
@@ -628,6 +636,7 @@ func (x *ModbusNode) reconnect(oldClient *modbus.ModbusClient) (*modbus.ModbusCl
 				return sourceNode.reconnect(oldClient)
 			}
 		}
+		return nil, fmt.Errorf("failed to get source modbus node from pool for instance %s", x.SharedNode.InstanceId)
 	}
 
 	x.reconnectLocker.Lock()
@@ -635,7 +644,11 @@ func (x *ModbusNode) reconnect(oldClient *modbus.ModbusClient) (*modbus.ModbusCl
 
 	// 检查连接是否已经被其他协程重建
 	currentClient, err := x.SharedNode.GetSafely()
-	if err == nil && currentClient != oldClient {
+	if err != nil {
+		// 获取或初始化失败，直接返回错误，避免无意义的双重重试
+		return nil, err
+	}
+	if currentClient != oldClient {
 		// 已经被其他协程重建，直接返回新连接
 		return currentClient, nil
 	}
