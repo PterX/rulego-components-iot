@@ -125,7 +125,7 @@ type RtuConfig struct {
 
 // reconnectFunc 重新获取连接的回调函数
 // 由 ModbusNode 提供，通过 SharedNode.Close() + GetSafely() 实现安全的连接重建
-type reconnectFunc func() (*modbus.ModbusClient, error)
+type reconnectFunc func(oldClient *modbus.ModbusClient) (*modbus.ModbusClient, error)
 
 // RetryableModbusClient 带重试逻辑的Modbus客户端
 type RetryableModbusClient struct {
@@ -161,7 +161,7 @@ func (r *RetryableModbusClient) executeWithRetry(operation string, fn func() err
 
 			// 通过 SharedNode 机制重建连接，避免直接操作共享连接
 			if r.reconnectFn != nil {
-				newClient, reconnectErr := r.reconnectFn()
+				newClient, reconnectErr := r.reconnectFn(r.client)
 				if reconnectErr != nil {
 					r.logf("Failed to reconnect: %s", reconnectErr)
 					return &ModbusConnErr{Err: reconnectErr}
@@ -505,12 +505,12 @@ func (r *RetryableModbusClient) SetEncoding(endianness modbus.Endianness, wordOr
 type ModbusNode struct {
 	base.SharedNode[*modbus.ModbusClient]
 	//节点配置
-	Config            ModbusConfiguration
-	addressTemplate   str.Template
-	quantityTemplate  str.Template
-	valueTemplate     str.Template
-	regTypeTemplate   str.Template
-	reconnectLocker   sync.Mutex
+	Config           ModbusConfiguration
+	addressTemplate  str.Template
+	quantityTemplate str.Template
+	valueTemplate    str.Template
+	regTypeTemplate  str.Template
+	reconnectLocker  sync.Mutex
 }
 
 type Params struct {
@@ -620,9 +620,26 @@ func readModbusValues[T bool | uint16 | uint32 | uint64 | float32 | float64 | by
 // reconnect 通过 SharedNode 机制安全地重建连接
 // 使用互斥锁避免并发重连导致惊群效应：多个请求同时失败时，只有一个执行 Close+GetSafely，
 // 其余请求等待后直接通过 GetSafely 获取已重建的连接
-func (x *ModbusNode) reconnect() (*modbus.ModbusClient, error) {
+func (x *ModbusNode) reconnect(oldClient *modbus.ModbusClient) (*modbus.ModbusClient, error) {
+	// 如果是共享节点池模式，则需要委托给实际拥有连接的源节点
+	if x.SharedNode.IsFromPool() && x.RuleConfig.NodePool != nil {
+		if nodeCtx, ok := x.RuleConfig.NodePool.Get(x.SharedNode.InstanceId); ok {
+			if sourceNode, ok := nodeCtx.GetNode().(*ModbusNode); ok {
+				return sourceNode.reconnect(oldClient)
+			}
+		}
+	}
+
 	x.reconnectLocker.Lock()
 	defer x.reconnectLocker.Unlock()
+
+	// 检查连接是否已经被其他协程重建
+	currentClient, err := x.SharedNode.GetSafely()
+	if err == nil && currentClient != oldClient {
+		// 已经被其他协程重建，直接返回新连接
+		return currentClient, nil
+	}
+
 	// Close 会清理 localClient 并重置 clientInitialized=false
 	_ = x.SharedNode.Close()
 	// GetSafely 检测到 clientInitialized=false 后会调用 InitInstanceFunc 创建新客户端
