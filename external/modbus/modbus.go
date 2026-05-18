@@ -133,16 +133,24 @@ type RetryableModbusClient struct {
 	maxRetries  int
 	logger      types.Logger
 	reconnectFn reconnectFunc
+	// 保存运行时配置（底层库不支持getter，重连后需手动恢复）
+	mu            sync.RWMutex
+	currentUnitId uint8
+	endianness    modbus.Endianness
+	wordOrder     modbus.WordOrder
 }
 
 // NewRetryableModbusClient 创建一个新的带重试逻辑的Modbus客户端
 // reconnectFn: 连接失败时用于重建连接的回调，由调用方通过 SharedNode 机制提供
-func NewRetryableModbusClient(client *modbus.ModbusClient, maxRetries int, logger types.Logger, reconnectFn reconnectFunc) *RetryableModbusClient {
+func NewRetryableModbusClient(client *modbus.ModbusClient, maxRetries int, logger types.Logger, reconnectFn reconnectFunc, unitId uint8, endianness modbus.Endianness, wordOrder modbus.WordOrder) *RetryableModbusClient {
 	return &RetryableModbusClient{
-		client:      client,
-		maxRetries:  maxRetries,
-		logger:      logger,
-		reconnectFn: reconnectFn,
+		client:        client,
+		maxRetries:    maxRetries,
+		logger:        logger,
+		reconnectFn:   reconnectFn,
+		currentUnitId: unitId,
+		endianness:    endianness,
+		wordOrder:     wordOrder,
 	}
 }
 
@@ -165,16 +173,18 @@ func (r *RetryableModbusClient) executeWithRetry(operation string, fn func() err
 				return err
 			}
 
-			r.logf("Modbus %s error: %s, retry count: %d, trying to reconnect...", operation, err, retry)
+			r.warnf("Modbus %s error: %s, retry count: %d, trying to reconnect...", operation, err, retry)
 
 			// 通过 SharedNode 机制重建连接，避免直接操作共享连接
 			if r.reconnectFn != nil {
 				newClient, reconnectErr := r.reconnectFn(r.client)
 				if reconnectErr != nil {
-					r.logf("Failed to reconnect: %s", reconnectErr)
+					r.warnf("Failed to reconnect: %s", reconnectErr)
 					return &ModbusConnErr{Err: reconnectErr}
 				}
 				r.client = newClient
+				// 恢复运行时配置到新连接
+				r.applyRuntimeConfig()
 			} else {
 				// 无重连回调，直接返回错误
 				return &ModbusConnErr{Err: err}
@@ -186,10 +196,10 @@ func (r *RetryableModbusClient) executeWithRetry(operation string, fn func() err
 	return &ModbusConnErr{Err: err}
 }
 
-// logf 记录日志
-func (r *RetryableModbusClient) logf(format string, v ...interface{}) {
+// warnf 记录警告日志
+func (r *RetryableModbusClient) warnf(format string, v ...interface{}) {
 	if r.logger != nil {
-		r.logger.Printf(format, v...)
+		r.logger.Warnf("[Modbus] "+format, v...)
 	}
 }
 
@@ -499,12 +509,35 @@ func (r *RetryableModbusClient) WriteRawBytes(address uint16, values []byte) err
 
 // SetUnitId 设置从机编号
 func (r *RetryableModbusClient) SetUnitId(unitId uint8) {
-	r.client.SetUnitId(unitId)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.currentUnitId = unitId
+	if r.client != nil {
+		r.client.SetUnitId(unitId)
+	}
 }
 
 // SetEncoding 设置编码
 func (r *RetryableModbusClient) SetEncoding(endianness modbus.Endianness, wordOrder modbus.WordOrder) {
-	r.client.SetEncoding(endianness, wordOrder)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.endianness = endianness
+	r.wordOrder = wordOrder
+	if r.client != nil {
+		r.client.SetEncoding(endianness, wordOrder)
+	}
+}
+
+// applyRuntimeConfig 恢复运行时配置到当前连接
+func (r *RetryableModbusClient) applyRuntimeConfig() {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if r.client != nil {
+		if r.currentUnitId != 0 {
+			r.client.SetUnitId(r.currentUnitId)
+		}
+		r.client.SetEncoding(r.endianness, r.wordOrder)
+	}
 }
 
 // ModbusNode 客户端节点，
@@ -519,6 +552,9 @@ type ModbusNode struct {
 	valueTemplate    str.Template
 	regTypeTemplate  str.Template
 	reconnectLocker  sync.Mutex
+	// 记录当前 UnitId
+	currentUnitId   uint8
+	currentUnitIdMu sync.RWMutex
 }
 
 type Params struct {
@@ -537,6 +573,21 @@ type ModbusValue struct {
 }
 
 // Type 返回组件类型
+
+func (x *ModbusNode) getCurrentUnitId() uint8 {
+	x.currentUnitIdMu.RLock()
+	defer x.currentUnitIdMu.RUnlock()
+	return x.currentUnitId
+}
+
+func (x *ModbusNode) setUnitId(client *modbus.ModbusClient, unitId uint8) {
+	x.currentUnitIdMu.Lock()
+	defer x.currentUnitIdMu.Unlock()
+	x.currentUnitId = unitId
+	if client != nil {
+		client.SetUnitId(unitId)
+	}
+}
 func (x *ModbusNode) Type() string {
 	return "x/modbus"
 }
@@ -573,6 +624,9 @@ func (x *ModbusNode) New() types.Node {
 func (x *ModbusNode) Init(ruleConfig types.Config, configuration types.Configuration) error {
 	err := maps.Map2Struct(configuration, &x.Config)
 	if err == nil {
+		// 初始化当前 UnitId
+		x.setUnitId(nil, x.Config.UnitId)
+
 		//初始化客户端
 		err = x.SharedNode.InitWithClose(ruleConfig, x.Type(), x.Config.Server, ruleConfig.NodeClientInitNow, func() (*modbus.ModbusClient, error) {
 			return x.initClient()
@@ -653,6 +707,12 @@ func (x *ModbusNode) reconnect(oldClient *modbus.ModbusClient) (*modbus.ModbusCl
 		return currentClient, nil
 	}
 
+	// 主动关闭旧连接并等待网关释放资源
+	if oldClient != nil {
+		_ = oldClient.Close()
+		time.Sleep(200 * time.Millisecond)
+	}
+
 	// Close 会清理 localClient 并重置 clientInitialized=false
 	_ = x.SharedNode.Close()
 	// GetSafely 检测到 clientInitialized=false 后会调用 InitInstanceFunc 创建新客户端
@@ -673,8 +733,13 @@ func (x *ModbusNode) OnMsg(ctx types.RuleContext, msg types.RuleMsg) {
 		return
 	}
 
-	// 为此次请求创建临时的retryableClient，传入 reconnect 回调
-	retryableClient := NewRetryableModbusClient(conn, 3, x.RuleConfig.Logger, x.reconnect)
+	// 为此次请求创建临时的retryableClient，传入 reconnect 回调和运行时配置
+	retryableClient := NewRetryableModbusClient(
+		conn, 3, x.RuleConfig.Logger, x.reconnect,
+		x.getCurrentUnitId(),
+		modbus.Endianness(x.Config.EncodingConfig.Endianness),
+		modbus.WordOrder(x.Config.EncodingConfig.WordOrder),
+	)
 
 	params, err = x.getParams(ctx, msg)
 	if err != nil {
@@ -811,84 +876,84 @@ func (x *ModbusNode) executeModbusCommand(params *Params, retryableClient *Retry
 	case "WriteCoil":
 		boolVal, err = byteToBool(params.Value)
 		if err != nil {
-			x.Printf("convert value error:%s", err)
+			x.errorf("convert value error:%s", err)
 		} else {
 			err = retryableClient.WriteCoil(params.Address, boolVal)
 		}
 	case "WriteCoils":
 		boolVals, err = byteToBools(params.Value)
 		if err != nil {
-			x.Printf("convert value error:%s", err)
+			x.errorf("convert value error:%s", err)
 		} else {
 			err = retryableClient.WriteCoils(params.Address, boolVals)
 		}
 	case "WriteRegister":
 		ui16, err = byteToUint16(params.Value)
 		if err != nil {
-			x.Printf("convert value error:%s", err)
+			x.errorf("convert value error:%s", err)
 		} else {
 			err = retryableClient.WriteRegister(params.Address, ui16)
 		}
 	case "WriteRegisters":
 		ui16s, err = byteToUint16s(params.Value)
 		if err != nil {
-			x.Printf("convert value error:%s", err)
+			x.errorf("convert value error:%s", err)
 		} else {
 			err = retryableClient.WriteRegisters(params.Address, ui16s)
 		}
 	case "WriteUint32":
 		ui32, err = byteToUint32(params.Value)
 		if err != nil {
-			x.Printf("convert value error:%s", err)
+			x.errorf("convert value error:%s", err)
 		} else {
 			err = retryableClient.WriteUint32(params.Address, ui32)
 		}
 	case "WriteUint32s":
 		ui32s, err = byteToUint32s(params.Value)
 		if err != nil {
-			x.Printf("convert value error:%s", err)
+			x.errorf("convert value error:%s", err)
 		} else {
 			err = retryableClient.WriteUint32s(params.Address, ui32s)
 		}
 	case "WriteFloat32":
 		f32, err = byteToFloat32(params.Value)
 		if err != nil {
-			x.Printf("convert value error:%s", err)
+			x.errorf("convert value error:%s", err)
 		} else {
 			err = retryableClient.WriteFloat32(params.Address, f32)
 		}
 	case "WriteFloat32s":
 		f32s, err = byteToFloat32s(params.Value)
 		if err != nil {
-			x.Printf("convert value error:%s", err)
+			x.errorf("convert value error:%s", err)
 		} else {
 			err = retryableClient.WriteFloat32s(params.Address, f32s)
 		}
 	case "WriteUint64":
 		ui64, err = byteToUint64(params.Value)
 		if err != nil {
-			x.Printf("convert value error:%s", err)
+			x.errorf("convert value error:%s", err)
 		} else {
 			err = retryableClient.WriteUint64(params.Address, ui64)
 		}
 	case "WriteUint64s":
 		ui64s, err = byteToUint64s(params.Value)
 		if err != nil {
-			x.Printf("convert value error:%s", err)
+			x.errorf("convert value error:%s", err)
 		} else {
 			err = retryableClient.WriteUint64s(params.Address, ui64s)
 		}
 	case "WriteFloat64":
 		f64, err = byteToFloat64(params.Value)
 		if err != nil {
-			x.Printf("convert value error:%s", err)
+			x.errorf("convert value error:%s", err)
 		} else {
 			err = retryableClient.WriteFloat64(params.Address, f64)
 		}
 	case "WriteFloat64s":
 		f64s, err = byteToFloat64s(params.Value)
 		if err != nil {
-			x.Printf("convert value error:%s", err)
+			x.errorf("convert value error:%s", err)
 		} else {
 			err = retryableClient.WriteFloat64s(params.Address, f64s)
 		}
@@ -966,9 +1031,32 @@ func (x *ModbusNode) Destroy() {
 }
 
 // Printf 打印日志
+// Deprecated: 使用 debugf/infof/warnf/errorf 代替
 func (x *ModbusNode) Printf(format string, v ...interface{}) {
+	x.infof(format, v...)
+}
+
+func (x *ModbusNode) debugf(format string, v ...interface{}) {
 	if x.RuleConfig.Logger != nil {
-		x.RuleConfig.Logger.Printf(format, v...)
+		x.RuleConfig.Logger.Debugf("[Modbus] "+format, v...)
+	}
+}
+
+func (x *ModbusNode) infof(format string, v ...interface{}) {
+	if x.RuleConfig.Logger != nil {
+		x.RuleConfig.Logger.Infof("[Modbus] "+format, v...)
+	}
+}
+
+func (x *ModbusNode) warnf(format string, v ...interface{}) {
+	if x.RuleConfig.Logger != nil {
+		x.RuleConfig.Logger.Warnf("[Modbus] "+format, v...)
+	}
+}
+
+func (x *ModbusNode) errorf(format string, v ...interface{}) {
+	if x.RuleConfig.Logger != nil {
+		x.RuleConfig.Logger.Errorf("[Modbus] "+format, v...)
 	}
 }
 
@@ -982,30 +1070,38 @@ func (x *ModbusNode) initClient() (*modbus.ModbusClient, error) {
 		Timeout:  time.Duration(x.Config.TcpConfig.Timeout) * time.Second,
 		Parity:   x.Config.RtuConfig.Parity,
 	}
+	x.debugf("Initializing Modbus connection to %s with timeout=%ds, unitId=%d",
+		x.Config.Server, x.Config.TcpConfig.Timeout, x.Config.UnitId)
 	// handle TLS options
 	if strings.HasPrefix(x.Config.Server, "tcp+tls://") {
 		clientKeyPair, err := tls.LoadX509KeyPair(x.Config.TcpConfig.CertPath, x.Config.TcpConfig.KeyPath)
 		if err != nil {
-			x.Printf("failed to load client tls key pair: %v\n", err)
+			x.errorf("failed to load client tls key pair: %v", err)
 			return nil, err
 		}
 		config.TLSClientCert = &clientKeyPair
 
 		config.TLSRootCAs, err = modbus.LoadCertPool(x.Config.TcpConfig.CaPath)
 		if err != nil {
-			x.Printf("failed to load tls CA/server certificate: %v\n", err)
+			x.errorf("failed to load tls CA/server certificate: %v", err)
 			return nil, err
 		}
 	}
 
 	conn, err := modbus.NewClient(config)
 	if err != nil {
+		x.errorf("Failed to create Modbus client: %v", err)
 		return nil, err
 	}
 	conn.SetEncoding(modbus.Endianness(x.Config.EncodingConfig.Endianness), modbus.WordOrder(x.Config.EncodingConfig.WordOrder))
 	conn.SetUnitId(x.Config.UnitId)
 
 	err = conn.Open()
+	if err != nil {
+		x.errorf("Failed to open Modbus connection: %v", err)
+		return nil, err
+	}
+	x.debugf("Modbus connection established successfully to %s", x.Config.Server)
 	return conn, err
 }
 
