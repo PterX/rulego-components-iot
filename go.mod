@@ -7,7 +7,7 @@ toolchain go1.24.3
 require (
 	github.com/gopcua/opcua v0.8.0
 	github.com/robfig/cron/v3 v3.0.1
-	github.com/rulego/rulego v0.35.3-0.20260204081739-95e6242cc74a
+	github.com/rulego/rulego v0.35.3-0.20260423094209-cc42209949ff
 	github.com/simonvetter/modbus v1.6.4
 	github.com/stretchr/testify v1.10.0
 	go.bug.st/serial v1.6.4
