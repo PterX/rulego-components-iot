@@ -76,51 +76,51 @@ func init() {
 // ModbusConfiguration 节点配置
 type ModbusConfiguration struct {
 	// 服务器地址
-	Server string `json:"server"`
+	Server string `json:"server" label:"Server" desc:"Modbus server address, format: tcp://host:port or rtu:///dev/ttyUSB0" required:"true" ref:"primary"`
 	// Modbus 方法名称
-	Cmd string `json:"cmd"`
+	Cmd string `json:"cmd" label:"Command" desc:"Modbus command: ReadCoils, ReadRegisters, WriteCoil, WriteRegister, etc."`
 	// UnitId 从机编号
-	UnitId uint8 `json:"unitId"`
+	UnitId uint8 `json:"unitId" label:"Unit ID" desc:"Modbus slave unit ID"`
 	// address 寄存器地址 允许使用 ${} 占位符变量，示例：50或者0x32
-	Address string `json:"address"`
+	Address string `json:"address" label:"Address" desc:"Register address, supports \${} variables, e.g. 50 or 0x32"`
 	// quantity 寄存器数量 允许使用 ${} 占位符变量
-	Quantity string `json:"quantity"`
+	Quantity string `json:"quantity" label:"Quantity" desc:"Number of registers, supports \${} variables"`
 	// value 寄存器值 允许使用 ${} 占位符变量。。读则不需要提供，如果写入多个与逗号隔开，例如：0x1,0x1 true 51,52
-	Value string `json:"value"`
+	Value string `json:"value" label:"Value" desc:"Register value for write, supports \${} variables, comma-separated for multiple"`
 	// RegType 寄存器类型：  允许使用 ${} 占位符变量，0:保持寄存器(功能码0x3)，1:输入寄存器(功能码:0x4)
-	RegType        string         `json:"regType"`
-	TcpConfig      TcpConfig      `json:"tcpConfig"`
-	RtuConfig      RtuConfig      `json:"rtuConfig"`
-	EncodingConfig EncodingConfig `json:"encodingConfig"`
+	RegType        string         `json:"regType" label:"Register Type" desc:"Register type: 0=Holding, 1=Input"`
+	TcpConfig      TcpConfig      `json:"tcpConfig" label:"TCP Config" desc:"TCP connection configuration"`
+	RtuConfig      RtuConfig      `json:"rtuConfig" label:"RTU Config" desc:"RTU serial configuration"`
+	EncodingConfig EncodingConfig `json:"encodingConfig" label:"Encoding Config" desc:"Data encoding configuration"`
 }
 
 type EncodingConfig struct {
 	// Endianness register endianness 1:大端序 2:小端序
-	Endianness uint `json:"endianness"`
+	Endianness uint `json:"endianness" label:"Endianness" desc:"Register endianness: 1=Big Endian, 2=Little Endian"`
 	// WordOrder word ordering for 32-bit registers 1:高字在前 2:低字在前
-	WordOrder uint `json:"wordOrder"`
+	WordOrder uint `json:"wordOrder" label:"Word Order" desc:"Word order for 32-bit registers: 1=High Word First, 2=Low Word First"`
 }
 
 type TcpConfig struct {
 	// Timeout sets the request timeout value,单位秒
-	Timeout int64 `json:"timeout"`
+	Timeout int64 `json:"timeout" label:"Timeout" desc:"Request timeout in seconds"`
 	// CertPath
-	CertPath string `json:"certPath"`
+	CertPath string `json:"certPath" label:"Cert Path" desc:"TLS client certificate file path"`
 	// KeyPath
-	KeyPath string `json:"keyPath"`
+	KeyPath string `json:"keyPath" label:"Key Path" desc:"TLS client private key file path"`
 	// CaPath
-	CaPath string `json:"caPath"`
+	CaPath string `json:"caPath" label:"CA Path" desc:"TLS CA certificate file path"`
 }
 
 type RtuConfig struct {
 	// Speed sets the serial link speed (in bps, rtu only)
-	Speed uint `json:"speed"`
+	Speed uint `json:"speed" label:"Speed" desc:"Serial link speed in bps"`
 	// DataBits sets the number of bits per serial character (rtu only)
-	DataBits uint `json:"dataBits"`
+	DataBits uint `json:"dataBits" label:"Data Bits" desc:"Bits per serial character: 5, 6, 7, 8"`
 	// Parity sets the serial link parity mode (rtu only)
-	Parity uint `json:"parity"`
+	Parity uint `json:"parity" label:"Parity" desc:"Parity mode: 0=None, 1=Odd, 2=Even"`
 	// StopBits sets the number of serial stop bits (rtu only)
-	StopBits uint `json:"stopBits"`
+	StopBits uint `json:"stopBits" label:"Stop Bits" desc:"Stop bits: 1, 2"`
 }
 
 // reconnectFunc 重新获取连接的回调函数
@@ -1028,6 +1028,11 @@ func (x *ModbusNode) getParams(ctx types.RuleContext, msg types.RuleMsg) (*Param
 // Destroy 销毁组件
 func (x *ModbusNode) Destroy() {
 	_ = x.SharedNode.Close()
+}
+
+// Desc returns the component description
+func (x *ModbusNode) Desc() string {
+	return "Modbus client for reading/writing registers. Supports TCP and RTU. Routes to Success/Failure"
 }
 
 // Printf 打印日志

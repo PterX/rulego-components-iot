@@ -40,19 +40,19 @@ func init() {
 // WriteNodeConfiguration  节点配置
 type WriteNodeConfiguration struct {
 	//OPC UA Server Endpoint, eg. opc.tcp://localhost:4840
-	Server string `json:"server"`
+	Server string `json:"server" label:"Server" desc:"OPC UA server endpoint, format: opc.tcp://host:port" required:"true" ref:"primary"`
 	//Security Policy URL or one of None, Basic128Rsa15, Basic256, Basic256Sha256
-	Policy string `json:"policy"`
+	Policy string `json:"policy" label:"Security Policy" desc:"Security policy: None, Basic128Rsa15, Basic256, Basic256Sha256"`
 	//Security Mode: one of None, Sign, SignAndEncrypt
-	Mode string `json:"mode"`
+	Mode string `json:"mode" label:"Security Mode" desc:"Security mode: None, Sign, SignAndEncrypt"`
 	//Authentication Mode: one of Anonymous, UserName, Certificate
-	Auth     string `json:"auth"`
-	Username string `json:"username"`
-	Password string `json:"password"`
+	Auth     string `json:"auth" label:"Auth Mode" desc:"Authentication mode: Anonymous, UserName, Certificate"`
+	Username string `json:"username" label:"Username" desc:"Authentication username" ref:"shared"`
+	Password string `json:"password" label:"Password" desc:"Authentication password" ref:"shared"`
 	//OPC UA Server CertFile Path
-	CertFile string `json:"certFile"`
+	CertFile string `json:"certFile" label:"Cert File" desc:"Client certificate file path" ref:"shared"`
 	//OPC UA Server CertKeyFile Path
-	CertKeyFile string `json:"certKeyFile"`
+	CertKeyFile string `json:"certKeyFile" label:"Cert Key File" desc:"Client private key file path" ref:"shared"`
 }
 
 func (c WriteNodeConfiguration) GetServer() string {
@@ -202,6 +202,11 @@ func (x *WriteNode) OnMsg(ctx types.RuleContext, msg types.RuleMsg) {
 // Destroy 清理资源
 func (x *WriteNode) Destroy() {
 	_ = x.SharedNode.Close()
+}
+
+// Desc returns the component description
+func (x *WriteNode) Desc() string {
+	return "OPC-UA client for writing node values. Routes to Success/Failure"
 }
 
 func (x *WriteNode) initClient() (*opcua.Client, error) {

@@ -179,26 +179,26 @@ func (r *ResponseMessage) GetError() error {
 // OpcUaConfig OPC UA Server配置
 type OpcUaConfig struct {
 	//OPC UA Server Endpoint, eg. opc.tcp://localhost:4840
-	Server string `json:"server"`
+	Server string `json:"server" label:"Server" desc:"OPC UA server endpoint, format: opc.tcp://host:port" required:"true" ref:"primary"`
 	//Security Policy URL or one of None, Basic128Rsa15, Basic256, Basic256Sha256
-	Policy string `json:"policy"`
+	Policy string `json:"policy" label:"Security Policy" desc:"Security policy: None, Basic128Rsa15, Basic256, Basic256Sha256"`
 	//Security Mode: one of None, Sign, SignAndEncrypt
-	Mode string `json:"mode"`
+	Mode string `json:"mode" label:"Security Mode" desc:"Security mode: None, Sign, SignAndEncrypt"`
 	//Authentication Mode: one of Anonymous, UserName, Certificate
-	Auth string `json:"auth"`
+	Auth string `json:"auth" label:"Auth Mode" desc:"Authentication mode: Anonymous, UserName, Certificate"`
 	//Authentication Username
-	Username string `json:"username"`
+	Username string `json:"username" label:"Username" desc:"Authentication username" ref:"shared"`
 	//Authentication Password
-	Password string `json:"password"`
+	Password string `json:"password" label:"Password" desc:"Authentication password" ref:"shared"`
 	//OPC UA Server CertFile Path
-	CertFile string `json:"certFile"`
+	CertFile string `json:"certFile" label:"Cert File" desc:"Client certificate file path" ref:"shared"`
 	//OPC UA Server CertKeyFile Path
-	CertKeyFile string `json:"certKeyFile"`
+	CertKeyFile string `json:"certKeyFile" label:"Cert Key File" desc:"Client private key file path" ref:"shared"`
 	//Interval to read, supports cron expressions
 	//example: @every 1m (every 1 minute) 0 0 0 * * * (triggers at midnight)
-	Interval string `json:"interval"`
+	Interval string `json:"interval" label:"Interval" desc:"Read interval, supports cron expression, e.g. @every 1m"`
 	//NodeIds to read, eg. ns=2;s=Channel1.Device1.Tag1
-	NodeIds []string `json:"nodeIds"`
+	NodeIds []string `json:"nodeIds" label:"Node IDs" desc:"OPC UA node IDs to read, e.g. ns=2;s=Channel1.Device1.Tag1"`
 }
 
 func (c OpcUaConfig) GetServer() string {
@@ -285,6 +285,25 @@ func (x *OpcUa) Destroy() {
 	x.GracefulShutdown.GracefulStop(func() {
 		_ = x.Close()
 	})
+}
+
+// Desc returns the component description
+func (x *OpcUa) Desc() string {
+	return "OPC-UA endpoint for subscribing to node changes and receiving real-time data updates"
+}
+
+// Category returns the component category
+func (x *OpcUa) Category() string {
+	return "endpoint"
+}
+
+func (x *OpcUa) Def() types.ComponentForm {
+	return types.ComponentForm{
+		Desc: "OPC-UA endpoint for subscribing to node changes and receiving real-time data updates",
+		RouterForm: &types.RouterForm{
+			Hide: true,
+		},
+	}
 }
 
 // GracefulStop provides graceful shutdown for the OPC UA endpoint

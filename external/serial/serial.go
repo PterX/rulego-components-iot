@@ -119,23 +119,23 @@ type ISerialPort interface {
 // SharedSerialConfig Shared serial connection configuration
 // SharedSerialConfig 共享的串口连接配置
 type SharedSerialConfig struct {
-	Port     string `json:"port"`
-	BaudRate int    `json:"baudRate"`
-	DataBits int    `json:"dataBits"`
-	StopBits string `json:"stopBits"` // "1", "1.5", "2"
-	Parity   string `json:"parity"`   // "N", "O", "E", "M", "S"
-	DTR      bool   `json:"dtr"`      // true, false
-	RTS      bool   `json:"rts"`      // true, false
+	Port     string `json:"port" label:"Port" desc:"Serial port name, e.g. COM1, /dev/ttyUSB0" required:"true" ref:"primary"`
+	BaudRate int    `json:"baudRate" label:"Baud Rate" desc:"Serial baud rate, e.g. 9600, 115200"`
+	DataBits int    `json:"dataBits" label:"Data Bits" desc:"Data bits per character: 5, 6, 7, 8"`
+	StopBits string `json:"stopBits" label:"Stop Bits" desc:"Stop bits: 1, 1.5, 2"`
+	Parity   string `json:"parity" label:"Parity" desc:"Parity: N=None, O=Odd, E=Even, M=Mark, S=Space"`
+	DTR      bool   `json:"dtr" label:"DTR" desc:"Data Terminal Ready signal"`
+	RTS      bool   `json:"rts" label:"RTS" desc:"Request To Send signal"`
 }
 
 // ReadConfig Read configuration
 // ReadConfig 读取配置
 type ReadConfig struct {
-	StartChar    string `json:"startChar"`    // Optional: start character. 可选：起始字符
-	SplitType    string `json:"splitType"`    // "char", "timeout", "fixed"
-	SplitKey     string `json:"splitKey"`     // Split char (e.g. \n) or length. 拆分字符(如\n) 或 长度
-	SplitTimeout int64  `json:"splitTimeout"` // Read split timeout (ms). 读取分段超时(ms)
-	DataType     string `json:"dataType"`     // "text", "binary", "hex", "base64"
+	StartChar    string `json:"startChar" label:"Start Char" desc:"Optional start character"`
+	SplitType    string `json:"splitType" label:"Split Type" desc:"Split mode: char, timeout, fixed"`
+	SplitKey     string `json:"splitKey" label:"Split Key" desc:"Split char (e.g. \\n) or length"`
+	SplitTimeout int64  `json:"splitTimeout" label:"Split Timeout" desc:"Read split timeout in ms"`
+	DataType     string `json:"dataType" label:"Data Type" desc:"Output data type: text, binary, hex, base64"`
 }
 
 // SerialInConfig Serial input node configuration
@@ -151,10 +151,10 @@ type SerialOutConfig struct {
 	SharedSerialConfig `json:",squash"`
 	// Data content to send, supports dynamic variable replacement (e.g. ${data}). If empty, use msg.Data
 	// Data 发送内容，支持动态变量替换（如 ${data}）。如果为空，则使用 msg.Data
-	Data string `json:"data"`
+	Data string `json:"data" label:"Data" desc:"Data to send, supports \${} variables, empty uses msg.Data"`
 	// (e.g. \r\n)
-	AddChar  string `json:"addChar"`  // Character appended when sending. 发送时追加的字符
-	DataType string `json:"dataType"` // "text", "hex", "base64"
+	AddChar  string `json:"addChar" label:"Add Char" desc:"Character appended when sending, e.g. \\r\\n"`
+	DataType string `json:"dataType" label:"Data Type" desc:"Data type: text, hex, base64"`
 }
 
 // SerialRequestConfig Serial request node configuration
@@ -163,15 +163,15 @@ type SerialRequestConfig struct {
 	SharedSerialConfig `json:",squash"`
 	// Data content to send, supports dynamic variable replacement (e.g. ${data}). If empty, use msg.Data
 	// Data 发送内容，支持动态变量替换（如 ${data}）。如果为空，则使用 msg.Data
-	Data string `json:"data"`
+	Data string `json:"data" label:"Data" desc:"Data to send, supports \${} variables, empty uses msg.Data"`
 	// Output settings
 	// (e.g. \r\n)
-	AddChar  string `json:"addChar"`
-	DataType string `json:"dataType"` // "text", "hex", "base64"
+	AddChar  string `json:"addChar" label:"Add Char" desc:"Character appended when sending, e.g. \\r\\n"`
+	DataType string `json:"dataType" label:"Data Type" desc:"Data type: text, hex, base64"`
 	// Input settings for response
 	ReadConfig `json:",squash"`
 	// Request specific
-	RequestTimeout int64 `json:"requestTimeout"` // Request total timeout (ms). 请求总超时时间(ms)
+	RequestTimeout int64 `json:"requestTimeout" label:"Request Timeout" desc:"Request total timeout in ms"`
 }
 
 // SerialControlConfig Serial control node configuration
@@ -180,7 +180,7 @@ type SerialControlConfig struct {
 	SharedSerialConfig `json:",squash"`
 	// Action Control instruction, supports dynamic variable replacement (e.g. ${msg.action}). If empty, use msg.Data as instruction
 	// Action 控制指令，支持动态变量替换（如 ${msg.action}）。如果为空，则使用 msg.Data 作为指令
-	Action string `json:"action"`
+	Action string `json:"action" label:"Action" desc:"Control action, supports \${} variables, e.g. open, close, dtr=1"`
 }
 
 // SafeSerialPort Thread-safe serial port wrapper
