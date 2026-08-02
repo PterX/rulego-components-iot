@@ -48,7 +48,6 @@ jobs:
         image: victoriametrics/victoria-metrics:latest
         ports:
           - 8428:8428
-        command: ["-httpListenAddr=:8428"]
 
       # TimescaleDB - timescaledb tsdb 驱动真实端到端
       timescaledb:
@@ -102,10 +101,9 @@ jobs:
 
       # Mosquitto - endpoint/mqtt 订阅场景 e2e
       mosquitto:
-        image: eclipse-mosquitto:2.0
+        image: eclipse-mosquitto:1.6.12
         ports:
           - 1883:1883
-        command: ["sh", "-c", "printf 'listener 1883\\nallow_anonymous true\\n' > /tmp/mosq.conf && mosquitto -c /tmp/mosq.conf"]
 
     strategy:
       matrix:
