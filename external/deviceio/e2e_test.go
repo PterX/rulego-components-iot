@@ -277,6 +277,8 @@ func TestEndToEnd_S7ToTDengine(t *testing.T) {
 	require.Nil(t, err)
 	defer db.Close()
 	m := fmt.Sprintf("e2e_s7chain_%d", time.Now().UnixNano())
+	_, err = db.Exec("CREATE DATABASE IF NOT EXISTS iot_e2e")
+	require.Nil(t, err, "create database")
 	_, err = db.Exec(fmt.Sprintf(
 		"CREATE STABLE iot_e2e.%s (ts TIMESTAMP, temp_c DOUBLE, press DOUBLE) TAGS (`host` NCHAR(32))", m))
 	require.Nil(t, err, "create stable")
