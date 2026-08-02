@@ -95,7 +95,7 @@ jobs:
 
       # OpenGemini - opengemini tsdb 驱动真实端到端（host 用 8087 避开 influxdb 占用的 8086）
       opengemini:
-        image: opengemini/opengemini:latest
+        image: opengeminidb/opengemini-server:1.2.0
         ports:
           - 8087:8086
 
